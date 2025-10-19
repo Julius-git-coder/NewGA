@@ -20,8 +20,8 @@ import {
   X,
   MessageSquare,
 } from "lucide-react";
-import { auth } from "../src/Service/FirebaseConfig";
-import useManageStore from "../Store/useManageStore";
+import { auth } from "../../Service/FirebaseConfig";
+import useManageStore from ".././Store/useManageStore";
 
 // Import all page components
 import Announcement from "../../Pages/Announcement";
