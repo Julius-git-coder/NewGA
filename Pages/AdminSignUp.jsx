@@ -1,4 +1,4 @@
-// AdminSignUp.jsx
+
 import React, { useState } from "react";
 import {
   Code,
@@ -15,7 +15,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { adminSignup, saveUserProfile } from "../Service/FirebaseConfig";
+import { adminSignup, verifyTeamId } from "../Service/FirebaseConfig";
 
 const AdminSignUp = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -34,6 +34,8 @@ const AdminSignUp = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingTeamId, setIsCheckingTeamId] = useState(false);
+  const [teamIdAvailable, setTeamIdAvailable] = useState(null);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -43,6 +45,45 @@ const AdminSignUp = () => {
       [name]: type === "checkbox" ? checked : value,
     }));
     setError("");
+    
+    // Reset Team ID availability when user changes it
+    if (name === "teamId") {
+      setTeamIdAvailable(null);
+    }
+  };
+
+  // Check if Team ID is available
+  const handleCheckTeamId = async () => {
+    if (!formData.teamId) {
+      setError("Please enter a Team ID");
+      return;
+    }
+
+    if (formData.teamId.length < 6) {
+      setError("Team ID must be at least 6 characters");
+      return;
+    }
+
+    setIsCheckingTeamId(true);
+    setError("");
+    setTeamIdAvailable(null);
+
+    try {
+      const exists = await verifyTeamId(formData.teamId);
+      
+      if (exists) {
+        setError("This Team ID is already taken. Please choose another one.");
+        setTeamIdAvailable(false);
+      } else {
+        setSuccess("✓ Team ID is available!");
+        setTeamIdAvailable(true);
+      }
+    } catch (err) {
+      setError("Error checking Team ID availability. Please try again.");
+      setTeamIdAvailable(null);
+    } finally {
+      setIsCheckingTeamId(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -50,6 +91,7 @@ const AdminSignUp = () => {
     setError("");
     setSuccess("");
     setIsLoading(true);
+
     // Validation
     if (
       !formData.fullName ||
@@ -65,6 +107,7 @@ const AdminSignUp = () => {
       setIsLoading(false);
       return;
     }
+
     // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formData.email)) {
@@ -72,70 +115,88 @@ const AdminSignUp = () => {
       setIsLoading(false);
       return;
     }
+
     // Admin code validation (example: must be 8 characters)
     if (formData.adminCode.length < 8) {
       setError("Invalid admin authorization code");
       setIsLoading(false);
       return;
     }
+
     // Team ID validation (unique, min 6 chars)
     if (formData.teamId.length < 6) {
       setError("Team ID must be at least 6 characters long");
       setIsLoading(false);
       return;
     }
+
     // Password validation
     if (formData.password.length < 8) {
       setError("Password must be at least 8 characters long");
       setIsLoading(false);
       return;
     }
+
     // Password match validation
     if (formData.password !== formData.confirmPassword) {
       setError("Passwords do not match");
       setIsLoading(false);
       return;
     }
+
     // Terms agreement validation
     if (!formData.agreeToTerms) {
       setError("You must agree to the terms and conditions");
       setIsLoading(false);
       return;
     }
+
     try {
-      // Use Firebase signup - teamId is the adminId
+      // Admin signup with Team ID creation
       const user = await adminSignup(
         formData.email,
         formData.password,
-        formData.teamId
+        formData.teamId,
+        {
+          name: formData.fullName,
+          phone: formData.phone,
+          department: formData.department,
+          adminCode: formData.adminCode,
+        }
       );
-      // Save additional profile data
-      await saveUserProfile(user.uid, {
-        name: formData.fullName,
-        phone: formData.phone,
-        department: formData.department,
-        adminCode: formData.adminCode, // Optional, for internal use
-        email: formData.email,
-        joinedAt: new Date(),
-      });
-      console.log("Admin signed up successfully");
-      setSuccess("Admin account created successfully! Redirecting...");
-      // Delay to allow Firestore writes to propagate and auth state to update
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      navigate("/Administrator");
+
+      console.log("✅ Admin signed up successfully:", user.uid);
+      setSuccess("Admin account created successfully! Redirecting to your dashboard...");
+
+      // Wait a bit to show success message, then redirect
+      setTimeout(() => {
+        navigate("/Administrator");
+      }, 2000);
     } catch (err) {
-      setError(err.message || "Signup failed. Please try again.");
+      console.error("❌ Signup error:", err);
+      
+      // User-friendly error messages
+      if (err.message.includes("Team ID is already taken")) {
+        setError("This Team ID is already taken. Please choose another one.");
+      } else if (err.code === "auth/email-already-in-use") {
+        setError("This email is already registered. Please login instead.");
+      } else if (err.code === "auth/weak-password") {
+        setError("Password is too weak. Please choose a stronger password.");
+      } else {
+        setError(err.message || "Signup failed. Please try again.");
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (success) {
+  if (success && success.includes("Redirecting")) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
         <div className="text-center">
           <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
           <h2 className="text-white text-2xl font-bold mb-2">{success}</h2>
+          <p className="text-gray-400">Your Team ID: <span className="text-yellow-500 font-semibold">{formData.teamId}</span></p>
         </div>
       </div>
     );
@@ -163,11 +224,10 @@ const AdminSignUp = () => {
                 <Shield className="w-6 h-6 text-yellow-500" />
               </div>
               <h3 className="text-white text-xl font-semibold mb-2">
-                Secure Admin Access
+                Create Your Team
               </h3>
               <p className="text-gray-400">
-                Manage students, track performance, and oversee the entire
-                learning ecosystem with advanced admin tools.
+                Set up your unique Team ID and start managing your students with powerful admin tools.
               </p>
             </div>
             <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
@@ -178,8 +238,7 @@ const AdminSignUp = () => {
                 Comprehensive Control
               </h3>
               <p className="text-gray-400">
-                Access all system features including grading, announcements, and
-                student management.
+                Access all system features including grading, announcements, and student management.
               </p>
             </div>
             <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
@@ -190,13 +249,12 @@ const AdminSignUp = () => {
                 Real-Time Insights
               </h3>
               <p className="text-gray-400">
-                Monitor student progress, attendance, and performance metrics in
-                real-time. where the will be able to make more improvement in
-                their learning journey every single day
+                Monitor student progress, attendance, and performance metrics in real-time.
               </p>
             </div>
           </div>
         </div>
+
         {/* Right Side - Sign Up Form */}
         <div className="w-full">
           <div className="bg-gray-800 rounded-2xl p-8 border border-gray-700 shadow-2xl">
@@ -209,6 +267,7 @@ const AdminSignUp = () => {
                 GradeA<span className="text-yellow-500">+</span>
               </h1>
             </div>
+
             <div className="mb-8">
               <div className="flex items-center space-x-2 mb-2">
                 <Shield className="w-8 h-8 text-yellow-500" />
@@ -220,17 +279,26 @@ const AdminSignUp = () => {
                 Requires authorization code from super admin
               </p>
             </div>
+
             {error && (
               <div className="bg-red-500 bg-opacity-10 border border-red-500 rounded-lg p-4 mb-6 flex items-center space-x-3">
                 <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                 <p className="text-white text-sm">{error}</p>
               </div>
             )}
+
+            {success && !success.includes("Redirecting") && (
+              <div className="bg-green-500 bg-opacity-10 border border-green-500 rounded-lg p-4 mb-6 flex items-center space-x-3">
+                <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
+                <p className="text-white text-sm">{success}</p>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Full Name Field */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
-                  Full Name
+                  Full Name *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -243,13 +311,15 @@ const AdminSignUp = () => {
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
                     placeholder="John Doe"
+                    required
                   />
                 </div>
               </div>
+
               {/* Email Field */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
-                  Email Address
+                  Email Address *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -262,14 +332,16 @@ const AdminSignUp = () => {
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
                     placeholder="admin@example.com"
+                    required
                   />
                 </div>
               </div>
+
               {/* Phone and Department Row */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-gray-400 text-sm font-medium mb-2">
-                    Phone Number
+                    Phone Number *
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -282,12 +354,13 @@ const AdminSignUp = () => {
                       onChange={handleChange}
                       className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
                       placeholder="+233 XXX XXX XXX"
+                      required
                     />
                   </div>
                 </div>
                 <div>
                   <label className="block text-gray-400 text-sm font-medium mb-2">
-                    Department
+                    Department *
                   </label>
                   <div className="relative">
                     <select
@@ -295,6 +368,7 @@ const AdminSignUp = () => {
                       value={formData.department}
                       onChange={handleChange}
                       className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg px-4 py-3 outline-none focus:border-yellow-500 transition-colors appearance-none cursor-pointer"
+                      required
                     >
                       <option value="">Select Department</option>
                       <option value="academic">Academic Affairs</option>
@@ -305,10 +379,11 @@ const AdminSignUp = () => {
                   </div>
                 </div>
               </div>
+
               {/* Admin Authorization Code */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
-                  Admin Authorization Code
+                  Admin Authorization Code *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -321,38 +396,58 @@ const AdminSignUp = () => {
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
                     placeholder="Enter authorization code"
+                    required
                   />
                 </div>
                 <p className="text-gray-500 text-xs mt-1">
                   Contact super admin to obtain authorization code
                 </p>
               </div>
-              {/* Team ID */}
+
+              {/* Team ID with Check Availability Button */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
                   Team ID (Unique - Share with your students) *
                 </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <Key className="w-5 h-5 text-gray-400" />
+                <div className="flex space-x-2">
+                  <div className="relative flex-1">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Key className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <input
+                      type="text"
+                      name="teamId"
+                      value={formData.teamId}
+                      onChange={handleChange}
+                      className={`w-full bg-gray-900 text-white border rounded-lg pl-12 pr-4 py-3 outline-none transition-colors ${
+                        teamIdAvailable === true
+                          ? "border-green-500"
+                          : teamIdAvailable === false
+                          ? "border-red-500"
+                          : "border-gray-700 focus:border-yellow-500"
+                      }`}
+                      placeholder="Enter unique team ID (e.g., TEAM001)"
+                      required
+                    />
                   </div>
-                  <input
-                    type="text"
-                    name="teamId"
-                    value={formData.teamId}
-                    onChange={handleChange}
-                    className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
-                    placeholder="Enter unique team ID (e.g., TEAM001)"
-                  />
+                  <button
+                    type="button"
+                    onClick={handleCheckTeamId}
+                    disabled={isCheckingTeamId || !formData.teamId}
+                    className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap"
+                  >
+                    {isCheckingTeamId ? "Checking..." : "Check"}
+                  </button>
                 </div>
                 <p className="text-gray-500 text-xs mt-1">
                   This ID will be used by students to join your team
                 </p>
               </div>
+
               {/* Password Field */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
-                  Password
+                  Password *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -365,24 +460,22 @@ const AdminSignUp = () => {
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-12 py-3 outline-none focus:border-yellow-500 transition-colors"
                     placeholder="At least 8 characters"
+                    required
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-white transition-colors"
                   >
-                    {showPassword ? (
-                      <EyeOff className="w-5 h-5" />
-                    ) : (
-                      <Eye className="w-5 h-5" />
-                    )}
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
               </div>
+
               {/* Confirm Password Field */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
-                  Confirm Password
+                  Confirm Password *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -395,20 +488,18 @@ const AdminSignUp = () => {
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-12 py-3 outline-none focus:border-yellow-500 transition-colors"
                     placeholder="Re-enter your password"
+                    required
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-white transition-colors"
                   >
-                    {showConfirmPassword ? (
-                      <EyeOff className="w-5 h-5" />
-                    ) : (
-                      <Eye className="w-5 h-5" />
-                    )}
+                    {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
               </div>
+
               {/* Terms Agreement */}
               <div className="flex items-start space-x-2">
                 <input
@@ -417,26 +508,21 @@ const AdminSignUp = () => {
                   checked={formData.agreeToTerms}
                   onChange={handleChange}
                   className="w-4 h-4 mt-1 bg-gray-900 border-gray-700 rounded focus:ring-yellow-500 focus:ring-2"
+                  required
                 />
                 <label className="text-gray-400 text-sm">
                   I agree to the{" "}
-                  <button
-                    type="button"
-                    className="text-yellow-500 hover:text-yellow-400"
-                  >
+                  <button type="button" className="text-yellow-500 hover:text-yellow-400">
                     Terms and Conditions
                   </button>{" "}
                   and{" "}
-                  <button
-                    type="button"
-                    className="text-yellow-500 hover:text-yellow-400"
-                  >
+                  <button type="button" className="text-yellow-500 hover:text-yellow-400">
                     Privacy Policy
                   </button>{" "}
-                  and confirm that I have proper authorization to create an
-                  admin account
+                  and confirm that I have proper authorization to create an admin account
                 </label>
               </div>
+
               {/* Submit Button */}
               <button
                 type="submit"
@@ -458,6 +544,7 @@ const AdminSignUp = () => {
                 )}
               </button>
             </form>
+
             {/* Divider */}
             <div className="relative my-6">
               <div className="absolute inset-0 flex items-center">
@@ -467,6 +554,7 @@ const AdminSignUp = () => {
                 <span className="px-4 bg-gray-800 text-gray-400">or</span>
               </div>
             </div>
+
             {/* Sign In Link */}
             <div className="text-center">
               <p className="text-gray-400">
@@ -479,6 +567,7 @@ const AdminSignUp = () => {
                 </button>
               </p>
             </div>
+
             {/* Security Notice */}
             <div className="mt-6 pt-6 border-t border-gray-700">
               <div className="bg-yellow-500 bg-opacity-10 border border-yellow-500 rounded-lg p-4 flex items-start space-x-3">
@@ -488,19 +577,16 @@ const AdminSignUp = () => {
                     Security Notice
                   </p>
                   <p className="text-gray-400 text-xs">
-                    Admin accounts have elevated privileges. Ensure you keep
-                    your credentials secure and never share your authorization
-                    code
+                    Admin accounts have elevated privileges. Ensure you keep your credentials secure and share your Team ID only with authorized students.
                   </p>
                 </div>
               </div>
             </div>
           </div>
+
           {/* Footer */}
           <div className="text-center mt-6">
-            <p className="text-gray-500 text-sm">
-              © 2025 GradeA+. All rights reserved.
-            </p>
+            <p className="text-gray-500 text-sm">© 2025 GradeA+. All rights reserved.</p>
           </div>
         </div>
       </div>

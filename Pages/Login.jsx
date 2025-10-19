@@ -1,8 +1,8 @@
-// Login.jsx
+
 import React, { useState } from "react";
-import { Code, Mail, Lock, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { Code, Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { login } from "../Service/FirebaseConfig";
+import { login, getUserRole } from "../Service/FirebaseConfig";
 
 const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -24,24 +24,54 @@ const Login = () => {
     setError("");
   };
 
-  const handleRoleLogin = async (role) => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     setError("");
+    
+    // Validation
     if (!formData.email || !formData.password) {
-      setError("Please fill in all fields before selecting a role");
+      setError("Please fill in all fields");
       return;
     }
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formData.email)) {
       setError("Please enter a valid email address");
       return;
     }
+
     setIsLoading(true);
+
     try {
-      await login(formData.email, formData.password);
-      // Role is determined in App.jsx via onAuthStateChanged
-      navigate(role === "admin" ? "/Administrator" : "/dashboard");
+      // Login with Firebase
+      const user = await login(formData.email, formData.password);
+      console.log("✅ Login successful:", user.uid);
+
+      // Get user role to determine redirect
+      const userData = await getUserRole(user.uid);
+      console.log("✅ User role:", userData.role);
+
+      // Redirect based on role
+      if (userData.role === "admin") {
+        navigate("/Administrator");
+      } else {
+        navigate("/dashboard");
+      }
     } catch (err) {
-      setError(err.message || "Login failed. Please check your credentials.");
+      console.error("❌ Login error:", err);
+      
+      // User-friendly error messages
+      if (err.code === "auth/user-not-found") {
+        setError("No account found with this email address");
+      } else if (err.code === "auth/wrong-password") {
+        setError("Incorrect password. Please try again");
+      } else if (err.code === "auth/invalid-credential") {
+        setError("Invalid email or password");
+      } else if (err.code === "auth/too-many-requests") {
+        setError("Too many failed attempts. Please try again later");
+      } else {
+        setError(err.message || "Login failed. Please try again");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -50,6 +80,7 @@ const Login = () => {
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+        {/* Left Side - Branding */}
         <div className="hidden lg:block space-y-6">
           <div className="flex items-center space-x-3 mb-8">
             <div className="w-16 h-16 bg-yellow-500 rounded-2xl flex items-center justify-center">
@@ -71,8 +102,7 @@ const Login = () => {
                 Track Your Progress
               </h3>
               <p className="text-gray-400">
-                Monitor your assignments, attendance, and overall performance in
-                real-time.
+                Monitor your assignments, attendance, and overall performance in real-time.
               </p>
             </div>
             <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
@@ -83,14 +113,16 @@ const Login = () => {
                 Stay Connected
               </h3>
               <p className="text-gray-400">
-                Receive announcements and collaborate with classmates through
-                Campus Connect.
+                Receive announcements and collaborate with classmates through Campus Connect.
               </p>
             </div>
           </div>
         </div>
+
+        {/* Right Side - Login Form */}
         <div className="w-full">
           <div className="bg-gray-800 rounded-2xl p-8 border border-gray-700 shadow-2xl">
+            {/* Mobile Logo */}
             <div className="lg:hidden flex items-center justify-center space-x-3 mb-8">
               <div className="w-12 h-12 bg-yellow-500 rounded-xl flex items-center justify-center">
                 <Code className="w-7 h-7 text-gray-900" />
@@ -99,21 +131,21 @@ const Login = () => {
                 GradeA<span className="text-yellow-500">+</span>
               </h1>
             </div>
+
             <div className="mb-8">
-              <h2 className="text-white text-3xl font-bold mb-2">
-                Welcome Back
-              </h2>
-              <p className="text-gray-400">
-                Sign in to continue to your dashboard
-              </p>
+              <h2 className="text-white text-3xl font-bold mb-2">Welcome Back</h2>
+              <p className="text-gray-400">Sign in to continue to your dashboard</p>
             </div>
+
             {error && (
               <div className="bg-red-500 bg-opacity-10 border border-red-500 rounded-lg p-4 mb-6 flex items-center space-x-3">
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                <p className=" text-sm">{error}</p>
+                <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                <p className="text-white text-sm">{error}</p>
               </div>
             )}
-            <div className="space-y-6">
+
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Email Field */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
                   Email Address
@@ -128,10 +160,12 @@ const Login = () => {
                     value={formData.email}
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
-                    placeholder="student@example.com"
+                    placeholder="your@email.com"
                   />
                 </div>
               </div>
+
+              {/* Password Field */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
                   Password
@@ -153,14 +187,12 @@ const Login = () => {
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-white transition-colors"
                   >
-                    {showPassword ? (
-                      <EyeOff className="w-5 h-5" />
-                    ) : (
-                      <Eye className="w-5 h-5" />
-                    )}
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
               </div>
+
+              {/* Remember Me & Forgot Password */}
               <div className="flex items-center justify-between">
                 <label className="flex items-center space-x-2 cursor-pointer">
                   <input
@@ -179,40 +211,30 @@ const Login = () => {
                   Forgot Password?
                 </button>
               </div>
-            </div>
-            <div className="mt-8 pt-6 border-t border-gray-700">
-              <p className="text-gray-400 text-sm text-center mb-4">
-                Select your role to continue:
-              </p>
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  onClick={() => handleRoleLogin("student")}
-                  disabled={isLoading}
-                  className={`bg-yellow-500 hover:bg-yellow-600 text-gray-900 px-6 py-3 rounded-lg font-bold transition-colors flex items-center justify-center ${
-                    isLoading ? "opacity-70 cursor-not-allowed" : ""
-                  }`}
-                >
-                  {isLoading ? (
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className={`w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-3 rounded-lg transition-all duration-300 flex items-center justify-center space-x-2 ${
+                  isLoading ? "opacity-70 cursor-not-allowed" : ""
+                }`}
+              >
+                {isLoading ? (
+                  <>
                     <div className="w-5 h-5 border-2 border-gray-900 border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    "Student"
-                  )}
-                </button>
-                <button
-                  onClick={() => handleRoleLogin("admin")}
-                  disabled={isLoading}
-                  className={`bg-gray-900 hover:bg-gray-700 text-yellow-500 px-6 py-3 rounded-lg font-bold transition-colors border-2 border-yellow-500 flex items-center justify-center ${
-                    isLoading ? "opacity-70 cursor-not-allowed" : ""
-                  }`}
-                >
-                  {isLoading ? (
-                    <div className="w-5 h-5 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    "Admin"
-                  )}
-                </button>
-              </div>
-            </div>
+                    <span>Signing In...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Sign In</span>
+                    <ArrowRight className="w-5 h-5" />
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* Divider */}
             <div className="relative my-6">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-gray-700"></div>
@@ -221,22 +243,33 @@ const Login = () => {
                 <span className="px-4 bg-gray-800 text-gray-400">or</span>
               </div>
             </div>
-            <div className="text-center">
+
+            {/* Sign Up Links */}
+            <div className="text-center space-y-2">
               <p className="text-gray-400">
-                Don't have an account?{" "}
+                Don't have an account?
+              </p>
+              <div className="flex space-x-4 justify-center">
                 <button
-                  onClick={() => navigate("/")}
+                  onClick={() => navigate("/student-signup")}
                   className="text-yellow-500 hover:text-yellow-400 font-semibold transition-colors"
                 >
-                  Sign Up
+                  Student Sign Up
                 </button>
-              </p>
+                <span className="text-gray-600">|</span>
+                <button
+                  onClick={() => navigate("/admin-signup")}
+                  className="text-yellow-500 hover:text-yellow-400 font-semibold transition-colors"
+                >
+                  Admin Sign Up
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* Footer */}
           <div className="text-center mt-6">
-            <p className="text-gray-500 text-sm">
-              © 2025 GradeA+. All rights reserved.
-            </p>
+            <p className="text-gray-500 text-sm">© 2025 GradeA+. All rights reserved.</p>
           </div>
         </div>
       </div>

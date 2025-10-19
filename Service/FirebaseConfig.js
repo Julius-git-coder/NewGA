@@ -1,4 +1,4 @@
-// Updated FirebaseConfig.js - Fixed timestamp handling for Firestore Timestamps
+// FirebaseConfig.js - Complete Team ID Implementation
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import {
@@ -26,7 +26,7 @@ import {
   getCountFromServer,
 } from "firebase/firestore";
 
-// Your web app's Firebase configuration
+// Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyAsINOQJO-JZBxLfOTZebbIX-b8AAvLMx0",
   authDomain: "gradea-16e92.firebaseapp.com",
@@ -43,55 +43,110 @@ const analytics = getAnalytics(app);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Admin Signup (Unique Admin ID - Chosen by Admin)
-async function adminSignup(email, password, adminId) {
+/**
+ * Admin Signup
+ * Creates admin account and registers their unique Team ID
+ * @param {string} email - Admin email
+ * @param {string} password - Admin password
+ * @param {string} teamId - Unique Team ID chosen by admin
+ * @param {object} profileData - Additional profile data (name, phone, department, etc.)
+ * @returns {Promise<object>} - User object
+ */
+async function adminSignup(email, password, teamId, profileData = {}) {
   try {
-    // Check if adminId is unique - Added .limit(1) to satisfy rules
-    const adminsQuery = query(
-      collection(db, "admins"),
-      where("adminId", "==", adminId),
-      limit(1) // Now properly imported
-    );
-    const querySnapshot = await getDocs(adminsQuery);
-    if (!querySnapshot.empty) {
-      throw new Error("Admin ID already exists. Please choose a unique ID.");
+    // Validate Team ID format
+    if (!teamId || teamId.length < 6) {
+      throw new Error("Team ID must be at least 6 characters long");
     }
-    // Create user with Auth
+
+    // Check if Team ID already exists (must be unique)
+    const teamIdQuery = query(
+      collection(db, "admins"),
+      where("teamId", "==", teamId),
+      limit(1)
+    );
+    const querySnapshot = await getDocs(teamIdQuery);
+
+    if (!querySnapshot.empty) {
+      throw new Error(
+        "This Team ID is already taken. Please choose another one."
+      );
+    }
+
+    // Create Firebase Auth user
     const userCredential = await createUserWithEmailAndPassword(
       auth,
       email,
       password
     );
     const user = userCredential.user;
+
     // Store admin data in Firestore
     await setDoc(doc(db, "admins", user.uid), {
+      uid: user.uid,
       email: email,
-      adminId: adminId,
-      teamStudents: [], // Array of student UIDs for easy reference
+      teamId: teamId, // Unique Team ID for this admin
+      role: "admin",
+      createdAt: serverTimestamp(),
+      teamStudents: [], // Array of student UIDs
+      ...profileData,
     });
-    console.log("Admin created successfully");
+
+    // Also store in users collection for unified access
+    await setDoc(doc(db, "users", user.uid), {
+      uid: user.uid,
+      email: email,
+      teamId: teamId,
+      role: "admin",
+      createdAt: serverTimestamp(),
+      ...profileData,
+    });
+
+    console.log("✅ Admin created successfully with Team ID:", teamId);
     return user;
   } catch (error) {
-    console.error("Error creating admin:", error);
+    console.error("❌ Error creating admin:", error);
     throw error;
   }
 }
 
-// Student Signup (Assignment to Admin Team)
-async function studentSignup(email, password, adminId) {
+/**
+ * Student Signup
+ * Creates student account and assigns them to admin's team using Team ID
+ * @param {string} email - Student email
+ * @param {string} password - Student password
+ * @param {string} teamId - Admin's Team ID (must exist)
+ * @param {object} profileData - Additional profile data (name, phone, studentId, etc.)
+ * @returns {Promise<object>} - User object with admin assignment
+ */
+async function studentSignup(email, password, teamId, profileData = {}) {
   try {
-    // Find admin by adminId - Added .limit(1) to satisfy rules
+    // Validate Team ID format
+    if (!teamId || teamId.length < 6) {
+      throw new Error("Team ID must be at least 6 characters long");
+    }
+
+    // Find admin by Team ID
     const adminsQuery = query(
       collection(db, "admins"),
-      where("adminId", "==", adminId),
-      limit(1) // Now properly imported
+      where("teamId", "==", teamId),
+      limit(1)
     );
     const querySnapshot = await getDocs(adminsQuery);
+
     if (querySnapshot.empty) {
-      throw new Error("No admin found with this ID. Signup denied.");
+      throw new Error(
+        "Invalid Team ID. No admin is registered with this ID. Please check with your administrator."
+      );
     }
+
+    // Get admin document
     const adminDoc = querySnapshot.docs[0];
     const adminUid = adminDoc.id;
+    const adminData = adminDoc.data();
+
+    console.log("✅ Found admin for Team ID:", teamId, "Admin UID:", adminUid);
+
     // Create student user with Auth
     const userCredential = await createUserWithEmailAndPassword(
       auth,
@@ -99,29 +154,55 @@ async function studentSignup(email, password, adminId) {
       password
     );
     const studentUid = userCredential.user.uid;
-    // Add student to admin's team subcollection
+
+    // Store student in admin's team subcollection
     await addDoc(collection(db, "admins", adminUid, "students"), {
       uid: studentUid,
       email: email,
-      joinedAt: new Date(),
+      joinedAt: serverTimestamp(),
+      ...profileData,
     });
-    // Store student data in top-level students collection with adminUid for easy reference
+
+    // Store student in top-level students collection
     await setDoc(doc(db, "students", studentUid), {
+      uid: studentUid,
       email: email,
       adminUid: adminUid,
-      joinedAt: new Date(),
+      teamId: teamId,
+      role: "student",
+      joinedAt: serverTimestamp(),
+      ...profileData,
     });
-    // Removed updateDoc here - It caused permission denial (student can't update admin doc)
-    // Use subcollection for team management/counts instead (already implemented in getStudentCount)
-    console.log("Student assigned to admin team successfully");
-    return userCredential.user;
+
+    // Store in unified users collection
+    await setDoc(doc(db, "users", studentUid), {
+      uid: studentUid,
+      email: email,
+      adminUid: adminUid,
+      teamId: teamId,
+      role: "student",
+      joinedAt: serverTimestamp(),
+      ...profileData,
+    });
+
+    console.log("✅ Student assigned to admin team successfully");
+    return {
+      user: userCredential.user,
+      adminUid: adminUid,
+      teamId: teamId,
+    };
   } catch (error) {
-    console.error("Error creating student:", error);
+    console.error("❌ Error creating student:", error);
     throw error;
   }
 }
 
-// Login function
+/**
+ * Login function
+ * @param {string} email
+ * @param {string} password
+ * @returns {Promise<object>} - User object
+ */
 async function login(email, password) {
   try {
     const userCredential = await signInWithEmailAndPassword(
@@ -136,60 +217,116 @@ async function login(email, password) {
   }
 }
 
-// Get User Profile from Firestore (unified for admins/students in 'users' collection)
-async function getUserProfile(uid) {
+/**
+ * Get User Role and Data
+ * Determines if user is admin or student and returns relevant data
+ * @param {string} uid - User ID from Firebase Auth
+ * @returns {Promise<object>} - User data with role
+ */
+async function getUserRole(uid) {
   try {
-    // First, check if a profile exists in the unified 'users' collection
+    // Check unified users collection first
     const userDocRef = doc(db, "users", uid);
     const userDocSnap = await getDoc(userDocRef);
+
+    if (userDocSnap.exists()) {
+      const userData = userDocSnap.data();
+      return {
+        role: userData.role,
+        teamId: userData.teamId,
+        adminUid: userData.adminUid || null,
+        ...userData,
+      };
+    }
+
+    // Fallback: Check admin collection
+    const adminDocRef = doc(db, "admins", uid);
+    const adminDocSnap = await getDoc(adminDocRef);
+
+    if (adminDocSnap.exists()) {
+      const adminData = adminDocSnap.data();
+      return {
+        role: "admin",
+        teamId: adminData.teamId,
+        ...adminData,
+      };
+    }
+
+    // Fallback: Check student collection
+    const studentDocRef = doc(db, "students", uid);
+    const studentDocSnap = await getDoc(studentDocRef);
+
+    if (studentDocSnap.exists()) {
+      const studentData = studentDocSnap.data();
+      return {
+        role: "student",
+        teamId: studentData.teamId,
+        adminUid: studentData.adminUid,
+        ...studentData,
+      };
+    }
+
+    throw new Error("User not found in database");
+  } catch (error) {
+    console.error("Error getting user role:", error);
+    throw error;
+  }
+}
+
+/**
+ * Verify Team ID exists
+ * Utility function to check if a Team ID is valid
+ * @param {string} teamId
+ * @returns {Promise<boolean>}
+ */
+async function verifyTeamId(teamId) {
+  try {
+    const adminsQuery = query(
+      collection(db, "admins"),
+      where("teamId", "==", teamId),
+      limit(1)
+    );
+    const querySnapshot = await getDocs(adminsQuery);
+    return !querySnapshot.empty;
+  } catch (error) {
+    console.error("Error verifying Team ID:", error);
+    return false;
+  }
+}
+
+/**
+ * Get User Profile
+ * @param {string} uid
+ * @returns {Promise<object>}
+ */
+async function getUserProfile(uid) {
+  try {
+    const userDocRef = doc(db, "users", uid);
+    const userDocSnap = await getDoc(userDocRef);
+
     if (userDocSnap.exists()) {
       const profile = userDocSnap.data();
-      // Map joinedAt to startDate if present
       if (profile.joinedAt) {
         profile.startDate = profile.joinedAt.toDate().toLocaleDateString();
       }
       return profile;
     }
-    // Fallback: Check admin or student specific collections
-    // For admins
+
+    // Fallback to role-specific collections
     const adminDocRef = doc(db, "admins", uid);
     const adminDocSnap = await getDoc(adminDocRef);
+
     if (adminDocSnap.exists()) {
-      const data = adminDocSnap.data();
-      return {
-        email: data.email,
-        name: "", // Admins may not have name; can be added later
-        phone: "",
-        location: "",
-        github: "",
-        linkedin: "",
-        bio: "",
-        cohort: "Admin", // Or fetch from elsewhere
-        startDate: new Date().toLocaleDateString(),
-        studentId: "",
-      };
+      return adminDocSnap.data();
     }
-    // For students
+
     const studentDocRef = doc(db, "students", uid);
     const studentDocSnap = await getDoc(studentDocRef);
+
     if (studentDocSnap.exists()) {
-      const data = studentDocSnap.data();
-      return {
-        email: data.email,
-        name: "", // Name not set yet; can be updated via profile
-        phone: "",
-        location: "",
-        github: "",
-        linkedin: "",
-        bio: "",
-        cohort: "2024-B", // Default; can be customized
-        startDate: data.joinedAt
-          ? data.joinedAt.toDate().toLocaleDateString()
-          : new Date().toLocaleDateString(),
-        studentId: "",
-      };
+      return studentDocSnap.data();
     }
-    // If no profile found anywhere, return null or defaults
+
     return null;
   } catch (error) {
     console.error("Error getting user profile:", error);
@@ -197,20 +334,21 @@ async function getUserProfile(uid) {
   }
 }
 
-// Save User Profile to Firestore (unified in 'users' collection)
+/**
+ * Save User Profile
+ * @param {string} uid
+ * @param {object} profile
+ */
 async function saveUserProfile(uid, profile) {
   try {
-    // Always save to unified 'users' collection with merge to avoid overwriting
     await setDoc(
       doc(db, "users", uid),
       {
         ...profile,
-        updatedAt: new Date(),
+        updatedAt: serverTimestamp(),
       },
       { merge: true }
     );
-    // Optionally, update specific collections if needed (e.g., students email)
-    // But for now, unified is sufficient
     console.log("Profile saved successfully");
   } catch (error) {
     console.error("Error saving user profile:", error);
@@ -218,29 +356,39 @@ async function saveUserProfile(uid, profile) {
   }
 }
 
-// Admin Dashboard (Display Total Students)
+/**
+ * Get Student Count for Admin
+ * @param {string} adminUid
+ * @returns {Promise<number>}
+ */
 async function getStudentCount(adminUid) {
-  // Use subcollection count for accuracy (handles deletions)
   const studentsCol = collection(db, "admins", adminUid, "students");
   const snapshot = await getCountFromServer(studentsCol);
   return snapshot.data().count;
 }
 
+/**
+ * Load Admin Dashboard
+ * @param {string} adminUid
+ * @param {function} callback
+ */
 function loadAdminDashboard(adminUid, callback) {
-  // Listen to student count changes
   const studentsCol = collection(db, "admins", adminUid, "students");
   onSnapshot(studentsCol, () => {
     getStudentCount(adminUid).then((count) => callback(count));
   });
 }
 
-// Sending Team-Wide Message
+/**
+ * Send Team Message
+ * @param {string} adminUid
+ * @param {string} message
+ */
 async function sendTeamMessage(adminUid, message) {
   try {
-    // Add message to teamMessages subcollection
     await addDoc(collection(db, "admins", adminUid, "teamMessages"), {
       message: message,
-      sender: "admin", // Or admin's name/ID
+      sender: "admin",
       timestamp: serverTimestamp(),
       isTeamMessage: true,
     });
@@ -250,12 +398,17 @@ async function sendTeamMessage(adminUid, message) {
   }
 }
 
-// Sending Private Message to Specific Student
-async function sendPrivateMessage(senderUid, studentUid, message) {
+/**
+ * Send Private Message
+ * @param {string} senderUid
+ * @param {string} receiverUid
+ * @param {string} message
+ */
+async function sendPrivateMessage(senderUid, receiverUid, message) {
   try {
     await addDoc(collection(db, "privateMessages"), {
       senderUid: senderUid,
-      receiverUid: studentUid,
+      receiverUid: receiverUid,
       message: message,
       timestamp: serverTimestamp(),
       isPrivate: true,
@@ -266,162 +419,21 @@ async function sendPrivateMessage(senderUid, studentUid, message) {
   }
 }
 
-// Get list of students for admin (for private messaging)
-async function getAdminStudents(adminUid) {
-  const studentsCol = collection(db, "admins", adminUid, "students");
-  const snapshot = await getDocs(studentsCol);
-  return snapshot.docs.map((doc) => ({ uid: doc.data().uid, ...doc.data() }));
-}
-
-// Fixed Listening to Messages for Students (Team + Private Sent and Received for full conversations)
-function listenToStudentMessages(studentUid, teamCallback, privateCallback) {
-  return getDoc(doc(db, "students", studentUid))
-    .then((studentDoc) => {
-      if (!studentDoc.exists()) {
-        console.warn("No student document found");
-        return () => {};
-      }
-      const studentData = studentDoc.data();
-      const adminUid = studentData.adminUid;
-      const unsubscribes = [];
-      // Listen to team messages
-      if (adminUid && teamCallback) {
-        const teamQuery = query(
-          collection(db, `admins/${adminUid}/teamMessages`)
-        );
-        const unsubscribeTeam = onSnapshot(teamQuery, (snapshot) => {
-          const messages = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-          }));
-          teamCallback(messages);
-        });
-        unsubscribes.push(unsubscribeTeam);
-      }
-      // Listen to private messages - combined sent and received
-      if (privateCallback) {
-        const allPrivateMessagesRef = { sent: [], received: [] };
-        const updatePrivateMessages = () => {
-          const combined = [
-            ...allPrivateMessagesRef.sent,
-            ...allPrivateMessagesRef.received,
-          ].sort(
-            (a, b) =>
-              (a.timestamp?.toDate() || new Date(0)) -
-              (b.timestamp?.toDate() || new Date(0))
-          );
-          privateCallback(combined.reverse()); // Newest first
-        };
-        // Listen to sent messages
-        const sentQuery = query(
-          collection(db, "privateMessages"),
-          where("senderUid", "==", studentUid)
-        );
-        const unsubscribeSent = onSnapshot(sentQuery, (snapshot) => {
-          allPrivateMessagesRef.sent = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-          }));
-          updatePrivateMessages();
-        });
-        unsubscribes.push(unsubscribeSent);
-        // Listen to received messages
-        const receivedQuery = query(
-          collection(db, "privateMessages"),
-          where("receiverUid", "==", studentUid)
-        );
-        const unsubscribeReceived = onSnapshot(receivedQuery, (snapshot) => {
-          allPrivateMessagesRef.received = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-          }));
-          updatePrivateMessages();
-        });
-        unsubscribes.push(unsubscribeReceived);
-      }
-      return () => unsubscribes.forEach((unsub) => unsub());
-    })
-    .catch((error) => {
-      console.error("Error setting up student message listeners:", error);
-      return () => {};
-    });
-}
-
-// Fixed Listening to Messages for Admins (Team + Private Sent and Received for full conversations)
-function listenToAdminMessages(adminUid, teamCallback, privateCallback) {
-  const unsubscribes = [];
-  // Listen to team messages
-  if (teamCallback) {
-    const teamQuery = query(collection(db, `admins/${adminUid}/teamMessages`));
-    const unsubscribeTeam = onSnapshot(teamQuery, (snapshot) => {
-      const messages = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      teamCallback(messages);
-    });
-    unsubscribes.push(unsubscribeTeam);
-  }
-  // Listen to private messages - combined sent and received
-  if (privateCallback) {
-    const allPrivateMessagesRef = { sent: [], received: [] };
-    const updatePrivateMessages = () => {
-      const combined = [
-        ...allPrivateMessagesRef.sent,
-        ...allPrivateMessagesRef.received,
-      ].sort(
-        (a, b) =>
-          (a.timestamp?.toDate() || new Date(0)) -
-          (b.timestamp?.toDate() || new Date(0))
-      );
-      privateCallback(combined.reverse()); // Newest first
-    };
-    // Listen to sent messages
-    const sentQuery = query(
-      collection(db, "privateMessages"),
-      where("senderUid", "==", adminUid)
-    );
-    const unsubscribeSent = onSnapshot(sentQuery, (snapshot) => {
-      allPrivateMessagesRef.sent = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      updatePrivateMessages();
-    });
-    unsubscribes.push(unsubscribeSent);
-    // Listen to received messages
-    const receivedQuery = query(
-      collection(db, "privateMessages"),
-      where("receiverUid", "==", adminUid)
-    );
-    const unsubscribeReceived = onSnapshot(receivedQuery, (snapshot) => {
-      allPrivateMessagesRef.received = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      updatePrivateMessages();
-    });
-    unsubscribes.push(unsubscribeReceived);
-  }
-  return () => unsubscribes.forEach((unsub) => unsub());
-}
-
-// Export functions and Firebase instances
+// Export functions
 export {
   auth,
   db,
   adminSignup,
   studentSignup,
   login,
+  getUserRole,
+  verifyTeamId,
+  getUserProfile,
+  saveUserProfile,
   loadAdminDashboard,
   getStudentCount,
   sendTeamMessage,
   sendPrivateMessage,
-  getAdminStudents,
-  listenToStudentMessages,
-  listenToAdminMessages,
   onAuthStateChanged,
   signOut,
-  getUserProfile,
-  saveUserProfile,
 };

@@ -1,4 +1,4 @@
-// StudentSignUp.jsx
+
 import React, { useState } from "react";
 import {
   Code,
@@ -15,7 +15,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { studentSignup, saveUserProfile } from "../Service/FirebaseConfig";
+import { studentSignup, verifyTeamId } from "../Service/FirebaseConfig";
 
 const StudentSignUp = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -33,6 +33,7 @@ const StudentSignUp = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isVerifyingTeam, setIsVerifyingTeam] = useState(false);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -44,11 +45,42 @@ const StudentSignUp = () => {
     setError("");
   };
 
+  // Verify Team ID when user types or clicks verify button
+  const handleVerifyTeamId = async () => {
+    if (!formData.teamId) {
+      setError("Please enter a Team ID");
+      return;
+    }
+
+    if (formData.teamId.length < 6) {
+      setError("Team ID must be at least 6 characters");
+      return;
+    }
+
+    setIsVerifyingTeam(true);
+    setError("");
+
+    try {
+      const isValid = await verifyTeamId(formData.teamId);
+      
+      if (isValid) {
+        setSuccess("✓ Team ID verified! You can proceed with signup.");
+      } else {
+        setError("Invalid Team ID. No admin is registered with this ID. Please check with your administrator.");
+      }
+    } catch (err) {
+      setError("Error verifying Team ID. Please try again.");
+    } finally {
+      setIsVerifyingTeam(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSuccess("");
     setIsLoading(true);
+
     // Validation
     if (
       !formData.fullName ||
@@ -63,6 +95,7 @@ const StudentSignUp = () => {
       setIsLoading(false);
       return;
     }
+
     // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formData.email)) {
@@ -70,52 +103,74 @@ const StudentSignUp = () => {
       setIsLoading(false);
       return;
     }
+
+    // Team ID validation
+    if (formData.teamId.length < 6) {
+      setError("Team ID must be at least 6 characters long");
+      setIsLoading(false);
+      return;
+    }
+
     // Password validation
     if (formData.password.length < 8) {
       setError("Password must be at least 8 characters long");
       setIsLoading(false);
       return;
     }
+
     // Password match validation
     if (formData.password !== formData.confirmPassword) {
       setError("Passwords do not match");
       setIsLoading(false);
       return;
     }
+
     // Terms agreement validation
     if (!formData.agreeToTerms) {
       setError("You must agree to the terms and conditions");
       setIsLoading(false);
       return;
     }
+
     try {
-      // Use Firebase signup - teamId is the adminId
-      const user = await studentSignup(
+      // Student signup with Team ID validation
+      const result = await studentSignup(
         formData.email,
         formData.password,
-        formData.teamId
+        formData.teamId,
+        {
+          name: formData.fullName,
+          phone: formData.phone,
+          studentId: formData.studentId,
+        }
       );
-      // Save additional profile data
-      await saveUserProfile(user.uid, {
-        name: formData.fullName,
-        phone: formData.phone,
-        studentId: formData.studentId,
-        email: formData.email,
-        joinedAt: new Date(),
-      });
-      console.log("Student signed up successfully");
-      setSuccess("Account created successfully! Redirecting...");
-      // Delay to allow Firestore writes to propagate and auth state to update
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      navigate("/dashboard");
+
+      console.log("✅ Student signed up successfully:", result);
+      setSuccess("Account created successfully! Redirecting to your dashboard...");
+
+      // Wait a bit to show success message, then redirect
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 2000);
     } catch (err) {
-      setError(err.message || "Signup failed. Please try again.");
+      console.error("❌ Signup error:", err);
+      
+      // User-friendly error messages
+      if (err.message.includes("Invalid Team ID")) {
+        setError("Invalid Team ID. No admin is registered with this ID. Please check with your administrator.");
+      } else if (err.code === "auth/email-already-in-use") {
+        setError("This email is already registered. Please login instead.");
+      } else if (err.code === "auth/weak-password") {
+        setError("Password is too weak. Please choose a stronger password.");
+      } else {
+        setError(err.message || "Signup failed. Please try again.");
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (success) {
+  if (success && success.includes("Redirecting")) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
         <div className="text-center">
@@ -148,11 +203,10 @@ const StudentSignUp = () => {
                 <GraduationCap className="w-6 h-6 text-yellow-500" />
               </div>
               <h3 className="text-white text-xl font-semibold mb-2">
-                Join Our Community
+                Join Your Team
               </h3>
               <p className="text-gray-400">
-                Become part of a thriving learning community and track your
-                progress toward excellence.
+                Enter your admin's Team ID to join their class and start learning.
               </p>
             </div>
             <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
@@ -163,24 +217,12 @@ const StudentSignUp = () => {
                 Access Resources
               </h3>
               <p className="text-gray-400">
-                Get instant access to class materials, assignments, and
-                collaborative tools.
-              </p>
-            </div>
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
-              <div className="w-12 h-12 bg-yellow-500 bg-opacity-20 rounded-xl flex items-center justify-center mb-4">
-                <ArrowRight className="w-6 h-6 text-yellow-500" />
-              </div>
-              <h3 className="text-white text-xl font-semibold mb-2">
-                Build Your Future
-              </h3>
-              <p className="text-gray-400">
-                Start your journey to becoming a skilled developer with our
-                comprehensive program.
+                Get instant access to class materials, assignments, and collaborative tools.
               </p>
             </div>
           </div>
         </div>
+
         {/* Right Side - Sign Up Form */}
         <div className="w-full">
           <div className="bg-gray-800 rounded-2xl p-8 border border-gray-700 shadow-2xl">
@@ -193,25 +235,33 @@ const StudentSignUp = () => {
                 GradeA<span className="text-yellow-500">+</span>
               </h1>
             </div>
+
             <div className="mb-8">
               <h2 className="text-white text-3xl font-bold mb-2">
                 Create Student Account
               </h2>
-              <p className="text-gray-400">
-                Sign up to start your learning journey
-              </p>
+              <p className="text-gray-400">Sign up to start your learning journey</p>
             </div>
+
             {error && (
               <div className="bg-red-500 bg-opacity-10 border border-red-500 rounded-lg p-4 mb-6 flex items-center space-x-3">
                 <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                 <p className="text-white text-sm">{error}</p>
               </div>
             )}
+
+            {success && !success.includes("Redirecting") && (
+              <div className="bg-green-500 bg-opacity-10 border border-green-500 rounded-lg p-4 mb-6 flex items-center space-x-3">
+                <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
+                <p className="text-white text-sm">{success}</p>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Full Name Field */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
-                  Full Name
+                  Full Name *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -224,13 +274,15 @@ const StudentSignUp = () => {
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
                     placeholder="John Doe"
+                    required
                   />
                 </div>
               </div>
+
               {/* Email Field */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
-                  Email Address
+                  Email Address *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -243,14 +295,16 @@ const StudentSignUp = () => {
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
                     placeholder="student@example.com"
+                    required
                   />
                 </div>
               </div>
-              {/* Phone, Student ID, and Team ID Row */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+
+              {/* Phone and Student ID Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-gray-400 text-sm font-medium mb-2">
-                    Phone Number
+                    Phone Number *
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -263,12 +317,13 @@ const StudentSignUp = () => {
                       onChange={handleChange}
                       className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
                       placeholder="+233 XXX XXX XXX"
+                      required
                     />
                   </div>
                 </div>
                 <div>
                   <label className="block text-gray-400 text-sm font-medium mb-2">
-                    Student ID
+                    Student ID *
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -281,14 +336,19 @@ const StudentSignUp = () => {
                       onChange={handleChange}
                       className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
                       placeholder="STD2024XXX"
+                      required
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-gray-400 text-sm font-medium mb-2">
-                    Team ID *
-                  </label>
-                  <div className="relative">
+              </div>
+
+              {/* Team ID Field with Verify Button */}
+              <div>
+                <label className="block text-gray-400 text-sm font-medium mb-2">
+                  Team ID (from your admin) *
+                </label>
+                <div className="flex space-x-2">
+                  <div className="relative flex-1">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                       <Key className="w-5 h-5 text-gray-400" />
                     </div>
@@ -298,18 +358,28 @@ const StudentSignUp = () => {
                       value={formData.teamId}
                       onChange={handleChange}
                       className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-4 py-3 outline-none focus:border-yellow-500 transition-colors"
-                      placeholder="Enter your admin's team ID (e.g., TEAM001)"
+                      placeholder="Enter Team ID (e.g., TEAM001)"
+                      required
                     />
                   </div>
-                  <p className="text-gray-500 text-xs mt-1">
-                    Ask your admin for the team ID
-                  </p>
+                  <button
+                    type="button"
+                    onClick={handleVerifyTeamId}
+                    disabled={isVerifyingTeam || !formData.teamId}
+                    className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap"
+                  >
+                    {isVerifyingTeam ? "Verifying..." : "Verify"}
+                  </button>
                 </div>
+                <p className="text-gray-500 text-xs mt-1">
+                  Ask your admin for the Team ID to join their class
+                </p>
               </div>
-              {/* Password Field */}
+
+              {/* Password Fields */}
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
-                  Password
+                  Password *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -322,24 +392,21 @@ const StudentSignUp = () => {
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-12 py-3 outline-none focus:border-yellow-500 transition-colors"
                     placeholder="At least 8 characters"
+                    required
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-white transition-colors"
                   >
-                    {showPassword ? (
-                      <EyeOff className="w-5 h-5" />
-                    ) : (
-                      <Eye className="w-5 h-5" />
-                    )}
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
               </div>
-              {/* Confirm Password Field */}
+
               <div>
                 <label className="block text-gray-400 text-sm font-medium mb-2">
-                  Confirm Password
+                  Confirm Password *
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -352,20 +419,18 @@ const StudentSignUp = () => {
                     onChange={handleChange}
                     className="w-full bg-gray-900 text-white border border-gray-700 rounded-lg pl-12 pr-12 py-3 outline-none focus:border-yellow-500 transition-colors"
                     placeholder="Re-enter your password"
+                    required
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-white transition-colors"
                   >
-                    {showConfirmPassword ? (
-                      <EyeOff className="w-5 h-5" />
-                    ) : (
-                      <Eye className="w-5 h-5" />
-                    )}
+                    {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
               </div>
+
               {/* Terms Agreement */}
               <div className="flex items-start space-x-2">
                 <input
@@ -374,24 +439,20 @@ const StudentSignUp = () => {
                   checked={formData.agreeToTerms}
                   onChange={handleChange}
                   className="w-4 h-4 mt-1 bg-gray-900 border-gray-700 rounded focus:ring-yellow-500 focus:ring-2"
+                  required
                 />
                 <label className="text-gray-400 text-sm">
                   I agree to the{" "}
-                  <button
-                    type="button"
-                    className="text-yellow-500 hover:text-yellow-400"
-                  >
+                  <button type="button" className="text-yellow-500 hover:text-yellow-400">
                     Terms and Conditions
                   </button>{" "}
                   and{" "}
-                  <button
-                    type="button"
-                    className="text-yellow-500 hover:text-yellow-400"
-                  >
+                  <button type="button" className="text-yellow-500 hover:text-yellow-400">
                     Privacy Policy
                   </button>
                 </label>
               </div>
+
               {/* Submit Button */}
               <button
                 type="submit"
@@ -413,6 +474,7 @@ const StudentSignUp = () => {
                 )}
               </button>
             </form>
+
             {/* Divider */}
             <div className="relative my-6">
               <div className="absolute inset-0 flex items-center">
@@ -422,6 +484,7 @@ const StudentSignUp = () => {
                 <span className="px-4 bg-gray-800 text-gray-400">or</span>
               </div>
             </div>
+
             {/* Sign In Link */}
             <div className="text-center">
               <p className="text-gray-400">
@@ -435,11 +498,10 @@ const StudentSignUp = () => {
               </p>
             </div>
           </div>
+
           {/* Footer */}
           <div className="text-center mt-6">
-            <p className="text-gray-500 text-sm">
-              © 2025 GradeA+. All rights reserved.
-            </p>
+            <p className="text-gray-500 text-sm">© 2025 GradeA+. All rights reserved.</p>
           </div>
         </div>
       </div>
