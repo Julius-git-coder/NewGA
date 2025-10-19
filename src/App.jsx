@@ -23,7 +23,6 @@ import {
 } from "lucide-react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import useManageStore from "../src/Store/useManageStore"; // Import the store
-import { onAuthStateChanged, signOut, auth } from "../Service/FirebaseConfig"; // Import Firebase auth with auth instance
 // Import all components from Pages folder
 import Announcement from "../Pages/Announcement";
 import Assignments from "../Pages/Assignments";
@@ -39,11 +38,7 @@ import BookSession from "../Pages/BookSections";
 import WorkReady from "../Pages/WorkReady";
 import Profile from "../Pages/Profile";
 import CampusConnect from "../Pages/CampusConnect";
-import Login from "../Pages/Login";
-import StudentSignUp from "../Pages/StudentSignUp";
-import AdminSignUp from "../Pages/AdminSignUp";
 import Administrator from "./Components/Administrator.jsx";
-
 // ChatModal component (duplicated from Directory for global use in Dashboard)
 const ChatModal = ({ onClose, otherUser, currentUser }) => {
   const [newMessage, setNewMessage] = useState("");
@@ -1091,8 +1086,8 @@ const DashboardContent = ({ setActiveTab }) => {
     </div>
   );
 };
-// Protected Dashboard Component - Added Firebase auth integration
-const ProtectedDashboard = () => {
+// Protected Dashboard Component - Removed Firebase message listening, local only; use directory for profile pic
+const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -1257,97 +1252,15 @@ const ProtectedDashboard = () => {
 const ProtectedAdministrator = () => {
   return <Administrator />;
 };
-// Main App Component - Added Firebase Auth back for routing
+// Main App Component - Removed Firebase Auth, always show Dashboard
 const App = () => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [role, setRole] = useState(null);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      if (user) {
-        // Fetch role from profile
-        // In practice, fetch from Firebase getUserProfile(user.uid).then(profile => setRole(profile.role || 'student'))
-        // For demo, assume role based on email or hardcoded
-        setRole(user.email.includes("@admin") ? "admin" : "student");
-      } else {
-        setRole(null);
-      }
-      setLoading(false);
-    });
-    return unsubscribe;
-  }, []);
-
-  if (loading) {
-    return <div className="min-h-screen">Loading...</div>;
-  }
-
-  const redirectToDashboard = (isAdmin) => {
-    return isAdmin ? "/Administrator" : "/dashboard";
-  };
-
+  // Removed user, role, loading state
+  // Always render Dashboard as student view
   return (
     <Routes>
-      <Route
-        path="/"
-        element={
-          user ? (
-            <Navigate to={redirectToDashboard(role === "admin")} replace />
-          ) : (
-            <StudentSignUp />
-          )
-        }
-      />
-      <Route
-        path="/admin-signup"
-        element={
-          user ? (
-            <Navigate to={redirectToDashboard(role === "admin")} replace />
-          ) : (
-            <AdminSignUp />
-          )
-        }
-      />
-      <Route
-        path="/login"
-        element={
-          user ? (
-            <Navigate to={redirectToDashboard(role === "admin")} replace />
-          ) : (
-            <Login />
-          )
-        }
-      />
-      <Route
-        path="/dashboard"
-        element={
-          user && role === "student" ? (
-            <ProtectedDashboard />
-          ) : (
-            <Navigate to="/login" />
-          )
-        }
-      />
-      <Route
-        path="/Administrator"
-        element={
-          user && role === "admin" ? (
-            <ProtectedAdministrator />
-          ) : (
-            <Navigate to="/login" />
-          )
-        }
-      />
-      <Route
-        path="*"
-        element={
-          <Navigate
-            to={user ? redirectToDashboard(role === "admin") : "/login"}
-            replace
-          />
-        }
-      />
+      <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/Administrator" element={<ProtectedAdministrator />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
 };
